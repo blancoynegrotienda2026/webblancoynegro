@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+:root {
+  --background: #fbf9f5;
+  --foreground: #212924;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  overflow-x: hidden;
+}
+
+/* Animación sutil de respiración energética */
+@keyframes zen-breathe {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.04);
+    opacity: 1;
+  }
+}
+
+@keyframes float-gentle {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+.animate-zen-breathe {
+  animation: zen-breathe 6s ease-in-out infinite;
+}
+
+.animate-float-gentle {
+  animation: float-gentle 5s ease-in-out infinite;
+}
+
+/* Textura sutil y degradados de aura */
+.aura-gradient-subtle {
+  background: radial-gradient(circle at 50% 20%, rgba(220, 235, 226, 0.7) 0%, rgba(251, 249, 245, 0.95) 70%);
+}
+
+.aura-card-glow {
+  box-shadow: 0 10px 30px -10px rgba(56, 83, 69, 0.07), 0 2px 8px -2px rgba(191, 161, 107, 0.05);
+}
+
+.aura-card-glow:hover {
+  box-shadow: 0 20px 35px -10px rgba(56, 83, 69, 0.12), 0 4px 12px -2px rgba(191, 161, 107, 0.1);
+}
