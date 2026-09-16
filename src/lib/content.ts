@@ -117,6 +117,20 @@ function buildWebDataFromPayload(payload: any): WebData {
  */
 export async function getWebData(): Promise<WebData> {
   // ESTRATEGIA 1: Vercel Blob (Almacén instantáneo de catálogo sincronizado desde el TPV)
+  try {
+    const directRes = await fetch("https://8jpivd50e95ayxtx.public.blob.vercel-storage.com/data/catalog.json", {
+      next: { revalidate: 30, tags: ["google-sheet-data"] },
+    });
+    if (directRes.ok) {
+      const directJson = await directRes.json();
+      if (directJson && (directJson.productos || directJson.products)) {
+        return buildWebDataFromPayload(directJson);
+      }
+    }
+  } catch (err) {
+    // Fallback a list() de Blob o Google Sheets
+  }
+
   if (process.env.BLOB_READ_WRITE_TOKEN) {
     try {
       const { list } = await import("@vercel/blob");
