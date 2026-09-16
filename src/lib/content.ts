@@ -90,9 +90,10 @@ function buildWebDataFromPayload(payload: any): WebData {
     };
   }).filter((p: any) => p.publicadoWeb && !(p.accionAgotado === "ocultar" && !p.inStock));
 
-  const sections = (payload.secciones || payload.sections || defaultWebData.sections)
-    .filter((s: any) => s.activo !== false)
-    .sort((a: any, b: any) => (a.orden || 0) - (b.orden || 0));
+  const rawSections = payload.secciones || payload.sections || defaultWebData.sections || [];
+  const sections = Array.isArray(rawSections)
+    ? rawSections.filter((s: any) => s && s.activo !== false).sort((a: any, b: any) => (a.orden || 0) - (b.orden || 0))
+    : [];
 
   return {
     ...defaultWebData,
