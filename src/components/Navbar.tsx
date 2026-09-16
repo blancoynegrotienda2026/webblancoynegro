@@ -33,7 +33,7 @@ export const Navbar: React.FC<NavbarProps> = ({ config, onOpenBooking }) => {
     { name: "Chakras", href: "#chakras" },
     { name: "Talleres", href: "#talleres" },
     { name: "Armonización", href: "#armonizacion" },
-    { name: "Tienda", href: "/tienda", isBadge: true },
+    { name: "Tienda", href: "/tienda" },
     { name: "Reseñas", href: "#resenas" },
     { name: "Contacto", href: "#contacto" },
   ];
@@ -95,11 +95,6 @@ export const Navbar: React.FC<NavbarProps> = ({ config, onOpenBooking }) => {
                   }`}
                 >
                   <span>{link.name}</span>
-                  {link.isBadge && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#dfc89f]/40 text-[#2d473b] border border-[#dfc89f]">
-                      Demo
-                    </span>
-                  )}
                 </Link>
               );
             })}
@@ -213,11 +208,6 @@ export const Navbar: React.FC<NavbarProps> = ({ config, onOpenBooking }) => {
                     className="px-3 py-2 text-base font-medium text-[#2d473b] hover:bg-[#f0ebe1] rounded-lg flex items-center justify-between"
                   >
                     <span>{link.name}</span>
-                    {link.isBadge && (
-                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-[#dfc89f]/40 text-[#2d473b] border border-[#dfc89f]">
-                        Demo
-                      </span>
-                    )}
                   </Link>
                 );
               })}

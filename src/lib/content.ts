@@ -57,13 +57,55 @@ function parseCsvLine(line: string): string[] {
  * Si no está disponible o falla la red, recurre de forma transparente a defaultWebData.
  */
 export async function getWebData(): Promise<WebData> {
-  const sheetId = process.env.GOOGLE_SHEET_ID || process.env.NEXT_PUBLIC_GOOGLE_SHEET_ID;
+  const rawTarget = (process.env.GOOGLE_SHEET_ID || process.env.NEXT_PUBLIC_GOOGLE_SHEET_ID || process.env.APPS_SCRIPT_URL || "").trim();
 
-  if (!sheetId) {
+  if (!rawTarget) {
     return defaultWebData;
   }
 
+  const isAppsScript = rawTarget.includes("script.google.com") || rawTarget.startsWith("AKfycb");
+  const appsScriptUrl = isAppsScript
+    ? (rawTarget.startsWith("http") ? rawTarget : `https://script.google.com/macros/s/${rawTarget}/exec`)
+    : null;
+
   try {
+    // Modo 1: Google Apps Script Webhook (Directo vía JSON)
+    if (appsScriptUrl) {
+      try {
+        const res = await fetch(`${appsScriptUrl}?action=get_data`, {
+          next: { revalidate: 60, tags: ["google-sheet-data"] },
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json && (json.success || json.productos || json.products || json.data)) {
+            const payload = json.data || json;
+            return {
+              ...defaultWebData,
+              config: {
+                ...defaultWebData.config,
+                ...(payload.config || {}),
+              },
+              therapies: payload.terapias || payload.therapies || defaultWebData.therapies,
+              workshops: payload.talleres || payload.workshops || defaultWebData.workshops,
+              harmonization: payload.armonizacion || payload.harmonization || defaultWebData.harmonization,
+              reviews: payload.resenas || payload.reviews || defaultWebData.reviews,
+              chakras: defaultWebData.chakras,
+              products: payload.productos || payload.products || defaultWebData.products,
+              sections: payload.secciones || payload.sections || defaultWebData.sections,
+            };
+          }
+        }
+      } catch (scriptErr) {
+        console.warn("Fallo al conectar con Google Apps Script, intentando método estándar:", scriptErr);
+      }
+    }
+
+    // Modo 2: Google Sheets CSV vía gviz/tq (cuando se proporciona el ID de la hoja)
+    const sheetId = isAppsScript ? "" : rawTarget;
+    if (!sheetId) {
+      return defaultWebData;
+    }
+
     const fetchSheetTab = async (tabName: string) => {
       const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`;
       const res = await fetch(url, {

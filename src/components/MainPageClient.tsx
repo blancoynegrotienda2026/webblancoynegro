@@ -34,6 +34,33 @@ export const MainPageClient: React.FC<MainPageClientProps> = ({ data }) => {
     setPreselectedService(undefined);
   };
 
+  const renderSectionComponent = (tipoPlantilla: string, key: string) => {
+    switch (tipoPlantilla) {
+      case "hero":
+        return <Hero key={key} config={data.config} onOpenBooking={() => handleOpenBooking()} />;
+      case "chakras":
+        return <ChakraStrip key={key} chakras={data.chakras} />;
+      case "sobre_mi":
+        return <AboutSection key={key} config={data.config} onOpenBooking={() => handleOpenBooking()} />;
+      case "terapias":
+        return <TherapiesSection key={key} therapies={data.therapies} onOpenBooking={handleOpenBooking} />;
+      case "talleres":
+        return <WorkshopsSection key={key} workshops={data.workshops} config={data.config} />;
+      case "armonizacion":
+        return <HarmonizationSection key={key} items={data.harmonization} config={data.config} />;
+      case "resenas":
+        return <ReviewsSection key={key} reviews={data.reviews} config={data.config} />;
+      case "reservas":
+      case "booking":
+        return <BookingSection key={key} config={data.config} onOpenBooking={() => handleOpenBooking()} />;
+      case "contacto":
+      case "ubicacion":
+        return <LocationSection key={key} config={data.config} />;
+      default:
+        return null;
+    }
+  };
+
   return (
     <div className="relative min-h-screen flex flex-col bg-[#fbf9f5]">
       {/* Cañas de bambú zen ambientales fijas en los bordes de la pantalla (visibles en toda la navegación) */}
@@ -61,15 +88,24 @@ export const MainPageClient: React.FC<MainPageClientProps> = ({ data }) => {
 
       {/* Contenido Principal */}
       <main className="flex-1 relative z-10">
-        <Hero config={data.config} onOpenBooking={() => handleOpenBooking()} />
-        <ChakraStrip chakras={data.chakras} />
-        <AboutSection config={data.config} onOpenBooking={() => handleOpenBooking()} />
-        <TherapiesSection therapies={data.therapies} onOpenBooking={handleOpenBooking} />
-        <WorkshopsSection workshops={data.workshops} config={data.config} />
-        <HarmonizationSection items={data.harmonization} config={data.config} />
-        <ReviewsSection reviews={data.reviews} config={data.config} />
-        <BookingSection config={data.config} onOpenBooking={() => handleOpenBooking()} />
-        <LocationSection config={data.config} />
+        {data.sections && data.sections.length > 0 ? (
+          data.sections
+            .filter((s) => s.activo)
+            .sort((a, b) => a.orden - b.orden)
+            .map((s, idx) => renderSectionComponent(s.tipoPlantilla, s.id || `sec-${idx}`))
+        ) : (
+          <>
+            <Hero config={data.config} onOpenBooking={() => handleOpenBooking()} />
+            <ChakraStrip chakras={data.chakras} />
+            <AboutSection config={data.config} onOpenBooking={() => handleOpenBooking()} />
+            <TherapiesSection therapies={data.therapies} onOpenBooking={handleOpenBooking} />
+            <WorkshopsSection workshops={data.workshops} config={data.config} />
+            <HarmonizationSection items={data.harmonization} config={data.config} />
+            <ReviewsSection reviews={data.reviews} config={data.config} />
+            <BookingSection config={data.config} onOpenBooking={() => handleOpenBooking()} />
+            <LocationSection config={data.config} />
+          </>
+        )}
       </main>
 
       {/* Pie de página */}
