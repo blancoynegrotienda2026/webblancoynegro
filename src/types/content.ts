@@ -79,7 +79,7 @@ export interface ChakraItem {
 export interface ShopProduct {
   id: string;
   name: string;
-  category: "aromaterapia" | "minerales" | "herramientas" | "armonizacion";
+  category: "aromaterapia" | "minerales" | "herramientas" | "armonizacion" | "terapias" | string;
   categoryLabel: string;
   shortDescription: string;
   fullDescription: string;

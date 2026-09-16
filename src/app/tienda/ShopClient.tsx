@@ -33,6 +33,11 @@ export const ShopClient: React.FC<ShopClientProps> = ({ config, products, therap
   const categories = [
     { id: "all", label: "Todos los productos", count: products.length },
     {
+      id: "terapias",
+      label: "Terapias & Masajes",
+      count: products.filter((p) => p.category === "terapias" || p.categoryLabel?.toLowerCase().includes("terapia")).length,
+    },
+    {
       id: "aromaterapia",
       label: "Aromaterapia & Esencias",
       count: products.filter((p) => p.category === "aromaterapia").length,
@@ -50,21 +55,24 @@ export const ShopClient: React.FC<ShopClientProps> = ({ config, products, therap
     {
       id: "armonizacion",
       label: "Armonización de Espacios",
-      count: products.filter((p) => p.category === "armonizacion").length,
+      count: products.filter((p) => p.category === "armonizacion" || p.category === "espacios").length,
     },
-  ];
+  ].filter((c) => c.id === "all" || c.count > 0 || c.id === "aromaterapia" || c.id === "minerales" || c.id === "herramientas" || c.id === "armonizacion");
 
   const filteredProducts = useMemo(() => {
     return products.filter((product) => {
       const matchesCategory =
-        selectedCategory === "all" || product.category === selectedCategory;
+        selectedCategory === "all" ||
+        product.category === selectedCategory ||
+        (selectedCategory === "terapias" && (product.category === "terapias" || product.categoryLabel?.toLowerCase().includes("terapia"))) ||
+        (selectedCategory === "armonizacion" && product.category === "espacios");
       const query = searchQuery.toLowerCase().trim();
       const matchesSearch =
         !query ||
         product.name.toLowerCase().includes(query) ||
         product.shortDescription.toLowerCase().includes(query) ||
         product.categoryLabel.toLowerCase().includes(query) ||
-        product.benefits.some((b) => b.toLowerCase().includes(query));
+        (product.benefits && product.benefits.some((b) => b.toLowerCase().includes(query)));
       return matchesCategory && matchesSearch;
     });
   }, [products, selectedCategory, searchQuery]);

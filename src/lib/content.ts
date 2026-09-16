@@ -52,11 +52,93 @@ function parseCsvLine(line: string): string[] {
 }
 
 /**
- * Carga los datos de la web.
- * Si GOOGLE_SHEET_ID está configurado, intenta sincronizar con las pestañas de Google Sheets.
- * Si no está disponible o falla la red, recurre de forma transparente a defaultWebData.
+ * Convierte un payload JSON recibido desde el TPV o Vercel Blob en una estructura WebData completa.
+ */
+function buildWebDataFromPayload(payload: any): WebData {
+  const rawProds = payload.productos || payload.products || [];
+  const parsedProducts: ShopProduct[] = rawProds.map((p: any, idx: number) => {
+    const rawImg = p.imagenUrl || p.imageUrl || p.imagen || p.foto || "";
+    const priceNum = typeof p.precioVenta === "number"
+      ? p.precioVenta
+      : (parseFloat(String(p.precioVenta || p.precio || "0").replace(",", ".")) || 0);
+    const origPriceNum = p.precioAnterior || p.originalPrice ? parseFloat(String(p.precioAnterior || p.originalPrice).replace(",", ".")) : undefined;
+    const stockNum = typeof p.stockActual === "number"
+      ? p.stockActual
+      : (parseInt(String(p.stockActual || p.stock || "0"), 10) || 0);
+    const accion = (p.accionAgotado || p.agotado || "mostrar_agotado") as ShopProduct["accionAgotado"];
+    const isPublicado = p.publicadoWeb !== false && String(p.publicadoWeb).toLowerCase() !== "false";
+    const inStock = stockNum > 0;
+
+    return {
+      id: p.id || p._id || p.ref || `prod-${idx + 1}`,
+      name: p.nombre || p.name || p.titulo || "Artículo Holístico",
+      category: p.categoria || p.category || "aromaterapia",
+      categoryLabel: p.categoriaLabel || p.categoryLabel || "Holístico",
+      shortDescription: p.descripcionCorta || p.shortDescription || "",
+      fullDescription: p.descripcionCompleta || p.fullDescription || p.descripcion || "",
+      price: priceNum,
+      originalPrice: origPriceNum,
+      badge: p.destacado || p.badge || undefined,
+      benefits: Array.isArray(p.beneficios || p.benefits)
+        ? (p.beneficios || p.benefits)
+        : (p.beneficios || "").split(";").map((b: string) => b.trim()).filter(Boolean),
+      imageUrl: formatImageUrl(rawImg, "https://images.unsplash.com/photo-1608571423902-eed4a5ad8108?auto=format&fit=crop&w=800&q=80"),
+      inStock,
+      stockActual: stockNum,
+      accionAgotado: accion,
+      publicadoWeb: isPublicado,
+    };
+  }).filter((p: any) => p.publicadoWeb && !(p.accionAgotado === "ocultar" && !p.inStock));
+
+  const sections = (payload.secciones || payload.sections || defaultWebData.sections)
+    .filter((s: any) => s.activo !== false)
+    .sort((a: any, b: any) => (a.orden || 0) - (b.orden || 0));
+
+  return {
+    ...defaultWebData,
+    config: {
+      ...defaultWebData.config,
+      ...(payload.config || {}),
+    },
+    products: parsedProducts.length > 0 ? parsedProducts : defaultWebData.products,
+    sections: sections.length > 0 ? sections : defaultWebData.sections,
+    therapies: payload.terapias || payload.therapies || defaultWebData.therapies,
+    workshops: payload.talleres || payload.workshops || defaultWebData.workshops,
+    harmonization: payload.armonizacion || payload.harmonization || defaultWebData.harmonization,
+    reviews: payload.resenas || payload.reviews || defaultWebData.reviews,
+  };
+}
+
+/**
+ * Carga los datos de la web con redundancia triple:
+ * 1. Catálogo instantáneo en Vercel Blob (directo desde el TPV al sincronizar).
+ * 2. Hojas de Google Sheets vía CSV (si GOOGLE_SHEET_ID es un ID válido de hoja).
+ * 3. Fallback transparente a datos por defecto.
  */
 export async function getWebData(): Promise<WebData> {
+  // ESTRATEGIA 1: Vercel Blob (Almacén instantáneo de catálogo sincronizado desde el TPV)
+  if (process.env.BLOB_READ_WRITE_TOKEN) {
+    try {
+      const { list } = await import("@vercel/blob");
+      const result = await list({ prefix: "data/catalog.json", limit: 1 });
+      if (result.blobs && result.blobs.length > 0) {
+        const catalogBlob = result.blobs[0];
+        const res = await fetch(catalogBlob.url, {
+          next: { revalidate: 30, tags: ["google-sheet-data"] },
+        });
+        if (res.ok) {
+          const blobJson = await res.json();
+          if (blobJson && (blobJson.productos || blobJson.products)) {
+            return buildWebDataFromPayload(blobJson);
+          }
+        }
+      }
+    } catch (blobErr) {
+      console.warn("Aviso: no se pudo leer catálogo desde Vercel Blob:", blobErr);
+    }
+  }
+
+  // ESTRATEGIA 2: Google Sheets CSV o Webhook
   const rawTarget = (process.env.GOOGLE_SHEET_ID || process.env.NEXT_PUBLIC_GOOGLE_SHEET_ID || process.env.APPS_SCRIPT_URL || "").trim();
 
   if (!rawTarget) {
@@ -69,7 +151,7 @@ export async function getWebData(): Promise<WebData> {
     : null;
 
   try {
-    // Modo 1: Google Apps Script Webhook (Directo vía JSON)
+    // Si es Webhook Apps Script con soporte get_data
     if (appsScriptUrl) {
       try {
         const res = await fetch(`${appsScriptUrl}?action=get_data`, {
@@ -77,30 +159,16 @@ export async function getWebData(): Promise<WebData> {
         });
         if (res.ok) {
           const json = await res.json();
-          if (json && (json.success || json.productos || json.products || json.data)) {
-            const payload = json.data || json;
-            return {
-              ...defaultWebData,
-              config: {
-                ...defaultWebData.config,
-                ...(payload.config || {}),
-              },
-              therapies: payload.terapias || payload.therapies || defaultWebData.therapies,
-              workshops: payload.talleres || payload.workshops || defaultWebData.workshops,
-              harmonization: payload.armonizacion || payload.harmonization || defaultWebData.harmonization,
-              reviews: payload.resenas || payload.reviews || defaultWebData.reviews,
-              chakras: defaultWebData.chakras,
-              products: payload.productos || payload.products || defaultWebData.products,
-              sections: payload.secciones || payload.sections || defaultWebData.sections,
-            };
+          if (json && (json.productos || json.products || json.data)) {
+            return buildWebDataFromPayload(json.data || json);
           }
         }
       } catch (scriptErr) {
-        console.warn("Fallo al conectar con Google Apps Script, intentando método estándar:", scriptErr);
+        console.warn("Aviso Webhook Apps Script:", scriptErr);
       }
     }
 
-    // Modo 2: Google Sheets CSV vía gviz/tq (cuando se proporciona el ID de la hoja)
+    // Si es un ID real de Google Sheet (no un ID de script)
     const sheetId = isAppsScript ? "" : rawTarget;
     if (!sheetId) {
       return defaultWebData;
@@ -109,7 +177,7 @@ export async function getWebData(): Promise<WebData> {
     const fetchSheetTab = async (tabName: string) => {
       const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`;
       const res = await fetch(url, {
-        next: { revalidate: 3600, tags: ["google-sheet-data"] },
+        next: { revalidate: 60, tags: ["google-sheet-data"] },
       });
       if (!res.ok) throw new Error(`Error al leer pestaña ${tabName}: ${res.statusText}`);
       const text = await res.text();
@@ -149,7 +217,6 @@ export async function getWebData(): Promise<WebData> {
           if (key === "whatsapp") updatedData.config.whatsapp = val.replace(/[^0-9]/g, "");
           if (key === "email") updatedData.config.email = val;
           if (key === "direccion" || key === "address") updatedData.config.address = val;
-          if (key === "ciudad" || key === "city") updatedData.config.city = val;
           if (key === "horario" || key === "schedule") updatedData.config.schedule = val;
         }
       });
@@ -157,27 +224,25 @@ export async function getWebData(): Promise<WebData> {
 
     // 1. Terapias
     if (terapiasRows.status === "fulfilled" && terapiasRows.value.length > 0) {
-      const customTherapies: Therapy[] = terapiasRows.value.map((row, idx) => {
-        const id = row["id"] || `terapia-${idx + 1}`;
-        const title = row["titulo"] || row["title"] || defaultWebData.therapies[0].title;
-        const category = (row["categoria"] || "quiromasaje") as Therapy["category"];
-        const rawImg = row["imagen"] || row["foto"] || row["imageurl"] || "";
-
-        return {
-          id,
-          title,
-          subtitle: row["subtitulo"] || row["subtitle"] || "",
-          category,
-          categoryLabel: row["etiqueta"] || "Terapia Holística",
-          shortDescription: row["descripcioncorta"] || row["shortdescription"] || "",
-          fullDescription: row["descripcioncompleta"] || row["fulldescription"] || "",
+      const customTherapies: Therapy[] = [];
+      for (let idx = 0; idx < terapiasRows.value.length; idx++) {
+        const row = terapiasRows.value[idx];
+        const rawImg = row["imagen"] || row["foto"] || "";
+        customTherapies.push({
+          id: row["id"] || `terapia-${idx + 1}`,
+          title: row["titulo"] || "Terapia Holística",
+          subtitle: row["subtitulo"] || "",
+          category: (row["categoria"] as Therapy["category"]) || "quiromasaje",
+          categoryLabel: row["etiqueta"] || "Bienestar",
+          shortDescription: row["descripcioncorta"] || row["descripcion"] || "",
+          fullDescription: row["descripcioncompleta"] || row["descripcion"] || "",
           benefits: (row["beneficios"] || "").split(";").map((b) => b.trim()).filter(Boolean),
-          duration: row["duracion"] || "60 minutos",
-          priceNote: row["precio"] || "Consultar",
-          imageUrl: formatImageUrl(rawImg, defaultWebData.therapies[0].imageUrl),
+          duration: row["duracion"] || "60 min",
+          priceNote: row["precio"] ? `${row["precio"]} €` : undefined,
           badge: row["destacado"] || undefined,
-        };
-      });
+          imageUrl: formatImageUrl(rawImg, "https://images.unsplash.com/photo-1544161515-4ab6ce6db874?auto=format&fit=crop&w=800&q=80"),
+        });
+      }
       if (customTherapies.length > 0) {
         updatedData.therapies = customTherapies;
       }
@@ -185,21 +250,23 @@ export async function getWebData(): Promise<WebData> {
 
     // 2. Talleres
     if (talleresRows.status === "fulfilled" && talleresRows.value.length > 0) {
-      const customWorkshops: Workshop[] = talleresRows.value.map((row, idx) => {
+      const customWorkshops: Workshop[] = [];
+      for (let idx = 0; idx < talleresRows.value.length; idx++) {
+        const row = talleresRows.value[idx];
         const rawImg = row["imagen"] || row["foto"] || "";
-        return {
+        customWorkshops.push({
           id: row["id"] || `taller-${idx + 1}`,
-          title: row["titulo"] || "Taller Holístico",
+          title: row["titulo"] || "Taller Vivencial",
           subtitle: row["subtitulo"] || "",
           date: row["fecha"] || "Próximamente",
-          time: row["horario"] || "Consultar",
+          time: row["hora"] || "17:00 - 20:00",
           modality: (row["modalidad"] as Workshop["modality"]) || "Presencial",
-          spots: row["plazas"] || "Plazas limitadas",
+          spots: row["plazas"] || "Plazas reducidas",
           description: row["descripcion"] || "",
           includes: (row["incluye"] || "").split(";").map((i) => i.trim()).filter(Boolean),
-          imageUrl: formatImageUrl(rawImg, defaultWebData.workshops[0].imageUrl),
-        };
-      });
+          imageUrl: formatImageUrl(rawImg, "https://images.unsplash.com/photo-1506126613408-eca07ce68773?auto=format&fit=crop&w=800&q=80"),
+        });
+      }
       if (customWorkshops.length > 0) {
         updatedData.workshops = customWorkshops;
       }
@@ -207,63 +274,72 @@ export async function getWebData(): Promise<WebData> {
 
     // 3. Armonización
     if (armonizacionRows.status === "fulfilled" && armonizacionRows.value.length > 0) {
-      const customHarmonization: HarmonizationItem[] = armonizacionRows.value.map((row, idx) => {
+      const customHarm: HarmonizationItem[] = [];
+      for (let idx = 0; idx < armonizacionRows.value.length; idx++) {
+        const row = armonizacionRows.value[idx];
         const rawImg = row["imagen"] || row["foto"] || "";
-        return {
+        customHarm.push({
           id: row["id"] || `armonizacion-${idx + 1}`,
-          title: row["titulo"] || "Elemento de Armonización",
-          category: (row["categoria"] as HarmonizationItem["category"]) || "minerales",
-          categoryLabel: row["etiqueta"] || "Armonización",
+          title: row["titulo"] || "Elemento Sagrado",
+          category: (row["categoria"] as HarmonizationItem["category"]) || "aromaterapia",
+          categoryLabel: row["etiqueta"] || "Armonía",
           description: row["descripcion"] || "",
           properties: (row["propiedades"] || "").split(";").map((p) => p.trim()).filter(Boolean),
-          usageTip: row["consejo"] || "",
-          imageUrl: formatImageUrl(rawImg, defaultWebData.harmonization[0].imageUrl),
-        };
-      });
-      if (customHarmonization.length > 0) {
-        updatedData.harmonization = customHarmonization;
+          usageTip: row["consejouso"] || row["consejo"] || "",
+          imageUrl: formatImageUrl(rawImg, "https://images.unsplash.com/photo-1608571423902-eed4a5ad8108?auto=format&fit=crop&w=800&q=80"),
+        });
+      }
+      if (customHarm.length > 0) {
+        updatedData.harmonization = customHarm;
       }
     }
 
     // 4. Reseñas
     if (resenasRows.status === "fulfilled" && resenasRows.value.length > 0) {
-      const customReviews: Review[] = resenasRows.value.map((row, idx) => ({
-        id: row["id"] || `resena-${idx + 1}`,
-        author: row["nombre"] || row["autor"] || "Cliente Satisfecho",
-        service: row["servicio"] || "Terapia Holística",
-        rating: Number(row["puntuacion"] || row["estrellas"]) || 5,
-        text: row["comentario"] || row["texto"] || "",
-        date: row["fecha"] || "Reciente",
-        verified: true,
-      }));
+      const customReviews: Review[] = [];
+      for (let idx = 0; idx < resenasRows.value.length; idx++) {
+        const row = resenasRows.value[idx];
+        customReviews.push({
+          id: row["id"] || `review-${idx + 1}`,
+          author: row["autor"] || "Cliente",
+          service: row["servicio"] || "Sesión de Bienestar",
+          rating: parseInt(row["estrellas"] || row["rating"] || "5", 10) || 5,
+          text: row["comentario"] || row["texto"] || "",
+          date: row["fecha"] || "Reciente",
+          verified: row["verificado"]?.toLowerCase() !== "false" && row["verificado"]?.toLowerCase() !== "no",
+        });
+      }
       if (customReviews.length > 0) {
         updatedData.reviews = customReviews;
       }
     }
 
-    // 5. Productos con Estados de Agotado
+    // 5. Productos con Estados de Agotado y soporte total a columnas TPV
     if (productosRows.status === "fulfilled" && productosRows.value.length > 0) {
       const parsedProducts: ShopProduct[] = [];
       for (let idx = 0; idx < productosRows.value.length; idx++) {
         const row = productosRows.value[idx];
-        const rawImg = row["imagen"] || row["foto"] || "";
-        const priceNum = parseFloat(row["precio"]?.replace(",", ".") || "0") || 15.0;
+        const rawImg = row["imagenurl"] || row["imagen"] || row["foto"] || "";
+        const priceNum = parseFloat(row["precioventa"]?.replace(",", ".") || row["precio"]?.replace(",", ".") || "0") || 0;
         const origPriceNum = row["precioanterior"] ? parseFloat(row["precioanterior"]?.replace(",", ".")) : undefined;
-        const stockNum = parseInt(row["stockactual"] || row["stock"] || "10", 10);
+        const stockNum = parseInt(row["stockactual"] || row["stock"] || "0", 10);
         const accion = (row["accionagotado"] || row["agotado"] || "mostrar_agotado") as ShopProduct["accionAgotado"];
+        const isPublicado = row["publicadoweb"] ? (row["publicadoweb"].toLowerCase() === "true" || row["publicadoweb"] === "1" || row["publicadoweb"].toLowerCase() === "si") : true;
+
+        if (!isPublicado) continue;
+
         const isExplicitNo = row["disponible"]?.toLowerCase() === "no" || row["stock"]?.toLowerCase() === "no";
         const inStock = !isExplicitNo && stockNum > 0;
 
-        // Si está configurado para "ocultar" al agotarse y no hay stock, se descarta
         if (accion === "ocultar" && !inStock) {
           continue;
         }
 
         parsedProducts.push({
-          id: row["id"] || `producto-${idx + 1}`,
+          id: row["id"] || row["ref"] || `producto-${idx + 1}`,
           name: row["nombre"] || row["titulo"] || "Producto Holístico",
           category: (row["categoria"] as ShopProduct["category"]) || "aromaterapia",
-          categoryLabel: row["etiqueta"] || "Holístico",
+          categoryLabel: row["categorialabel"] || row["etiqueta"] || "Holístico",
           shortDescription: row["descripcioncorta"] || "",
           fullDescription: row["descripcioncompleta"] || row["descripcion"] || "",
           price: priceNum,
