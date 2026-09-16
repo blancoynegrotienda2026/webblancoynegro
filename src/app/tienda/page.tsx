@@ -3,7 +3,8 @@ import { getWebData } from "@/lib/content";
 import { defaultShopProducts } from "@/data/shopProducts";
 import { ShopClient } from "./ShopClient";
 
-export const revalidate = 3600;
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export const metadata: Metadata = {
   title: "Tienda Holística & Autocuidado | Blanco y Negro - Terapias",
