@@ -1,0 +1,82 @@
+import { NextRequest, NextResponse } from "next/server";
+import { put } from "@vercel/blob";
+import fs from "fs";
+import path from "path";
+
+export async function POST(req: NextRequest) {
+  try {
+    const authHeader = req.headers.get("x-sync-secret") || req.headers.get("authorization");
+    const expectedSecret = process.env.REVALIDATE_SECRET || "aura-pepi-secret-key";
+
+    if (authHeader && authHeader.replace("Bearer ", "") !== expectedSecret) {
+      return NextResponse.json(
+        { error: "No autorizado. Token de sincronización inválido." },
+        { status: 401 }
+      );
+    }
+
+    let buffer: Buffer;
+    let filename: string;
+
+    const contentType = req.headers.get("content-type") || "";
+
+    if (contentType.includes("multipart/form-data")) {
+      const formData = await req.formData();
+      const file = formData.get("file") as File | null;
+      if (!file) {
+        return NextResponse.json({ error: "No se encontró ningún archivo en el formulario." }, { status: 400 });
+      }
+      const arrayBuffer = await file.arrayBuffer();
+      buffer = Buffer.from(arrayBuffer);
+      filename = file.name || `foto_${Date.now()}.webp`;
+    } else {
+      const body = await req.json();
+      if (!body.base64) {
+        return NextResponse.json({ error: "Campo base64 requerido." }, { status: 400 });
+      }
+      const match = body.base64.match(/^data:image\/([a-zA-Z0-9]+);base64,(.+)$/);
+      const dataStr = match ? match[2] : body.base64;
+      buffer = Buffer.from(dataStr, "base64");
+      filename = body.filename || `foto_${Date.now()}.webp`;
+    }
+
+    // Asegurar extensión .webp
+    if (!filename.toLowerCase().endsWith(".webp")) {
+      filename = `${filename.replace(/\.[^/.]+$/, "")}.webp`;
+    }
+
+    // 1. Si Vercel Blob está configurado (Producción en Vercel)
+    if (process.env.BLOB_READ_WRITE_TOKEN) {
+      const blob = await put(`productos/${filename}`, buffer, {
+        access: "public",
+        contentType: "image/webp",
+      });
+
+      return NextResponse.json({
+        success: true,
+        url: blob.url,
+        filename,
+        provider: "vercel-blob",
+      });
+    }
+
+    // 2. Respaldo para local o sin token de Blob configurado
+    const uploadDir = path.join(process.cwd(), "public", "uploads");
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+
+    const localFilePath = path.join(uploadDir, filename);
+    fs.writeFileSync(localFilePath, buffer);
+
+    return NextResponse.json({
+      success: true,
+      url: `/uploads/${filename}`,
+      filename,
+      provider: "local-static",
+    });
+  } catch (err: any) {
+    console.error("Error al subir imagen:", err);
+    return NextResponse.json({ error: err.message || "Error al procesar la subida" }, { status: 500 });
+  }
+}
